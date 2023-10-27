@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vue-3-proxy-reflect</title>
+</head>
+
+<body>
+
+</body>
+
+<!-- <script>
+    // 基本的proxy和Reflect使用
+    const target = {
+        name: '小光',
+        age: 22,
+        hobbies: ['write', 'run'],
+        details: {
+            mbit: 'isfp'
+        }
+    }
+
+    const handler = {
+        get(target, key, receiver) {
+            console.log(`获取对象属性${key}值`)
+            return Reflect.get(target, key, receiver)
+        },
+        set(target, key, value, receiver) {
+            console.log(`设置对象属性${key}值`)
+            return Reflect.set(target, key, value, receiver)
+        },
+        deleteProperty(target, key) {
+            console.log(`删除对象属性${key}值`)
+            return Reflect.deleteProperty(target, key)
+        }
+    }
+
+    const proxy = new Proxy(target, handler)
+    console.log(proxy.name)
+    proxy.name = 21
+    console.log(delete proxy.name)
+</script> -->
+
+
+<!-- <script src="./reactive.js"></script> -->
+
+<script type="module">
+    import { reactive } from './reactive.js'
+    const obj = {
+        name: '小光',
+        age: 22,
+        hobbies: ['write', 'run'],
+        details: {
+            mbit: 'isfp',
+            test: {
+                test1: {
+                    test2: 24
+                }
+            }
+        }
+    }
+
+    const proxy = reactive(obj)
+
+    console.log(proxy.age)
+    proxy.details.test.test1.test2 = 22
+    console.log(delete proxy.age)
+</script>
+
+</html>
