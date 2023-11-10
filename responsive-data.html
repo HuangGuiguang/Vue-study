@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>responsive-data</title>
+</head>
+
+<body>
+
+</body>
+<script>
+    // effect函数会影响到innerText的内容, 而这个变量在这个函数之外也是可以访问到的, 也就是说执行这个函数会影响到其他地方, 那么这个函数就是一个副作用函数
+    function effect() {
+        document.body.innerText = 'hello vue3'
+    }
+
+    // 响应式数据, 当数据发生变化时, 与其有关系的副作用函数可以被执行
+    // 如下面的例子, effectFn中使用到了obj.text, obj.text发生改变后, 希望effectFn也能够被执行
+    let obj = {
+        text: 'hello responsive data'
+    }
+    function effectFn() {
+        document.body.innerText = obj.text
+    }
+    // 要执行, 如果不执行那么说明和obj.text也没关系
+    effectFn()
+    obj.text = 'hello vue3'
+</script>
+
+<script>
+    // 响应式数据的基本实现
+    // 在上面的例子中, effectFn执行发生在obj.text被读取时, 如果能实现obj.text被设置时把effectFn收集起来, 在obj.text设置时再执行收集的函数
+    // 那么就可以实现响应式, 如下
+    // 要操作的是代理后的对象
+    // let bucket = new Set()
+    // let data = { text: 'hello responsive data' }
+    // const proxyObj = new Proxy(data, {
+    //     get: function (target, key) {
+    //         bucket.add(effectFn)
+    //         return target[key]
+    //     },
+    //     set: function (target, key, val) {
+    //         target[key] = val
+    //         for (const item of bucket) {
+    //             item()
+    //         }
+    //         return true
+    //     }
+    // })
+    // function effectFn() {
+    //     document.body.innerText = proxyObj.text
+    // }
+    // effectFn()
+    // setTimeout(() => {
+    //     proxyObj.text = 'hello vue3'
+    //     console.log(proxyObj.text)
+    // }, 2000)
+
+    // 缺陷: 收集的副作用函数是写死的
+</script>
+
+<script>
+    let count = 1
+    // 全局声明一个变量用于记录当前的副作用函数
+    // let activeEffectFn = null
+    // function watchEffectFn(fn) {
+    //     activeEffectFn = fn
+    //     fn()
+    //     activeEffectFn = null
+    // }
+    // function effectFnTest() {
+    //     document.body.innerText = proxyObj.text + '     ' + count
+    // }
+
+    // let bucket = new Set()
+    // let data = { text: 'hello responsive data', testKey: 1 }
+    // const proxyObj = new Proxy(data, {
+    //     get: function (target, key) {
+    //         if (activeEffectFn) {
+    //             bucket.add(activeEffectFn)
+    //         }
+    //         return target[key]
+    //     },
+    //     set: function (target, key, val) {
+    //         target[key] = val
+    //         for (const item of bucket) {
+    //             item()
+    //         }
+    //         return true
+    //     }
+    // })
+    // watchEffectFn(effectFnTest)
+    // setTimeout(() => {
+    //     proxyObj.text = 'hello vue3'
+    //     count++
+    // }, 2000)
+    // setTimeout(() => {
+    //     proxyObj.testKey = 2
+    //     count++
+    // }, 4000)
+    // 缺点: 不管改变的是data上的哪个key, 都会触发副作用函数, 如我改变的是testKey上的知, 副作用函数并没有依赖testKey的值, 但还是触发了更新
+    // 所以, 要把key的副作用函数对应起来, 结构差不多如下: {
+    //     key: new Set()
+    //     key2: new Set()
+    // }
+
+    // 扁平化数组
+    const arr = [[1, 2, 4], 2, [4, 4, 45], [2, [3, 5, 6]], [[1, 2], [2, 3, [55, 66, 77]]]]
+    console.log(arr.flat(Infinity))
+    // 主要还是concat在起作用
+    function flatArr(arr) {
+        const result = arr.reduce((prev, current) => {
+            if (Object.prototype.toString.call(current) === '[object Array]') {
+                return prev.concat(flatArr(current))
+            } else {
+                return prev.concat(current)
+            }
+        }, [])
+        return result
+    }
+    console.log(flatArr(arr))
+</script>
+
+
+<script>
+    function textEffectFn() {
+        console.log(proxyObj.text)
+    }
+
+    function testKeyEffectFn() {
+        console.log(proxyObj.testKey)
+    }
+
+    function textAndOkEffectFn() {
+        console.log('textAndOkEffectFn')
+        document.body.innerText = proxyObj.ok ? proxyObj.text : 'not'
+    }
+
+    let activeEffectFn = null
+    const effectStack = []
+    function watchEffectFn(fn) {
+        // activeEffectFn = fn
+        // fn()
+        // activeEffectFn = null
+        const effectFn = () => {
+            cleanUp(effectFn)
+            activeEffectFn = effectFn
+            effectStack.push(effectFn)
+            fn()
+            effectStack.pop()
+            activeEffectFn = effectStack[effectStack.length - 1]
+        }
+
+        effectFn.deps = []
+        effectFn()
+    }
+
+    function cleanUp(fn) {
+        for (let i = 0; i < fn.deps.length; i++) {
+            let deps = fn.deps[i]
+            deps.delete(fn)
+        }
+        fn.deps.length = 0
+    }
+
+    const targetBucket = new WeakMap()
+    const data = { text: 'hello vue3', testKey: 'test', ok: true, foo: true, bar: true, count: 1 }
+
+    const proxyObj = new Proxy(data, {
+        get: function (target, key, receiver) {
+            // 需要把副作用函数按照key放进set里
+            track(target, key, receiver)
+            return target[key]
+        },
+        set: function (target, key, newVal, receiver) {
+            target[key] = newVal
+            // 获取key的对应的副作用函数，并执行
+            trigger(target, key, newVal, receiver)
+            return true
+        }
+    })
+
+    /**
+     * 依赖收集
+     */
+    function track(target, key, receiver) {
+        if (!activeEffectFn) return
+        let depsMap = targetBucket.get(target)
+
+        if (!depsMap) {
+            targetBucket.set(target, (depsMap = new Map()))
+        }
+
+        let deps = depsMap.get(key)
+        if (!deps) {
+            depsMap.set(key, (deps = new Set()))
+        }
+
+        if (activeEffectFn) {
+            deps.add(activeEffectFn)
+        }
+
+        activeEffectFn.deps.push(deps) // 存储当前key的set, 意为这个副作用函数影响的keySet集合
+    }
+
+    /**
+     * 触发依赖
+     */
+    function trigger(target, key, newVal, receiver) {
+        const depsMap = targetBucket.get(target)
+        if (!depsMap) return
+        const effects = depsMap.get(key)
+        let effectsToRun = new Set(effects)
+        effectsToRun && effectsToRun.forEach(fn => {
+            if (fn !== activeEffectFn) fn() // 避免无限嵌套
+        })
+    }
+
+    watchEffectFn(textEffectFn)
+    watchEffectFn(testKeyEffectFn)
+    watchEffectFn(textAndOkEffectFn)
+    // 嵌套的effect
+    let temp1 = null
+    let temp2 = null
+    watchEffectFn(() => {
+        console.log('读取foo属性')
+        watchEffectFn(() => {
+            console.log('读取bar属性')
+            temp2 = proxyObj.bar
+        })
+        temp1 = proxyObj.foo
+    })
+    // 避免无限嵌套
+    watchEffectFn(() => {
+        proxyObj.count++
+    })
+
+    // console.log(targetBucket.get(data).get('text'), targetBucket.get(data).get('testKey')) // 各自的Set里存储了一个effectFn
+    // for (const item of targetBucket.get(data).get('text')) {
+    //     console.log(item.deps);
+    // }
+    // for (const item of targetBucket.get(data).get('testKey')) {
+    //     console.log(item.deps);
+    // }
+    setTimeout(() => {
+        proxyObj.ok = false
+    }, 2000)
+    setTimeout(() => {
+        proxyObj.text = 'hello responsive data'
+    }, 4000)
+    setTimeout(() => {
+        proxyObj.testKey = 2
+    }, 6000)
+
+    // 理想的情况是, 先打印一次'读取foo属性'，一次'读取bar属性'
+    // 修改foo时，打印一次'读取foo属性'，一次'读取bar属性'
+    // 但实际上是打印了一次'读取bar属性'
+    // 原因出在activeEffectFn被嵌套的effect函数覆盖了，收集到的副作用函数也都会是内层副作用函数
+    setTimeout(() => {
+        proxyObj.foo = false
+    }, 8000)
+</script>
+
+</html>
