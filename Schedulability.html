@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+    <div>可调度性</div>
+</body>
+<script>
+    // 可调度性指的是可以控制副作用函数的执行时机、次数、方式
+    let activeEffectFn = null
+    const effectStack = []
+    function watchEffectFn(fn, options) {
+        const effectFn = () => {
+            cleanUp(effectFn)
+            activeEffectFn = effectFn
+            effectStack.push(effectFn)
+            fn()
+            effectStack.pop()
+            activeEffectFn = effectStack[effectStack.length - 1]
+        }
+        effectFn.options = options // 把options存储
+        effectFn.deps = []
+        effectFn()
+    }
+
+    function cleanUp(fn) {
+        for (let i = 0; i < fn.deps.length; i++) {
+            let deps = fn.deps[i]
+            deps.delete(fn)
+        }
+        fn.deps.length = 0
+    }
+
+    const targetBucket = new WeakMap()
+    const data = { foo: 1, bar: 1 }
+
+    const proxyObj = new Proxy(data, {
+        get: function (target, key, receiver) {
+            // 需要把副作用函数按照key放进set里
+            track(target, key, receiver)
+            return target[key]
+        },
+        set: function (target, key, newVal, receiver) {
+            target[key] = newVal
+            // 获取key的对应的副作用函数，并执行
+            trigger(target, key, newVal, receiver)
+            return true
+        }
+    })
+
+    /**
+     * 依赖收集
+     */
+    function track(target, key, receiver) {
+        if (!activeEffectFn) return
+        let depsMap = targetBucket.get(target)
+
+        if (!depsMap) {
+            targetBucket.set(target, (depsMap = new Map()))
+        }
+
+        let deps = depsMap.get(key)
+        if (!deps) {
+            depsMap.set(key, (deps = new Set()))
+        }
+
+        if (activeEffectFn) {
+            deps.add(activeEffectFn)
+        }
+
+        activeEffectFn.deps.push(deps) // 存储当前key的set, 意为这个副作用函数影响的keySet集合
+    }
+
+    /**
+     * 触发依赖
+     */
+    function trigger(target, key, newVal, receiver) {
+        const depsMap = targetBucket.get(target)
+        if (!depsMap) return
+        const effects = depsMap.get(key)
+        let effectsToRun = new Set()
+        effects && effects.forEach((effectFn) => {
+            if (effectFn !== activeEffectFn) {
+                effectsToRun.add(effectFn) // 避免无限嵌套
+            }
+        })
+        effectsToRun.forEach(fn => {
+            if (fn.options && fn.options.scheduler) {
+                fn.options.scheduler(fn)
+            } else {
+                fn()
+            }
+        })
+    }
+
+    // 执行顺序为1 2 结束了
+    // watchEffectFn(() => {
+    //     console.log(proxyObj.foo)
+    // })
+
+    // proxyObj.foo++
+
+    // console.log('结束了')
+
+    // 控制执行顺序
+    // 把执行set的时机放在下一个宏任务队列里, 就可以调换顺序
+    // 执行顺序为1 结束了 2
+    watchEffectFn(() => {
+        console.log(proxyObj.foo)
+    }, { // options
+        // 调度器scheduler是一个函数
+        scheduler(fn) {
+            // ...
+            setTimeout(fn)
+        }
+    })
+
+    proxyObj.foo++
+
+    console.log('结束了')
+
+    // 控制执行顺序
+    // 下面的执行顺序是1 2 3, 但是中间的2是不必要执行的, 期望的结果为1 2
+    // 其实核心就是这些set的操作其实都是同步操作，能把执行的副作用收集起来，放在下一个宏任务或者当前宏任务的微任务队列里，就可以控制执行
+
+    // 定义一个任务队列, 使用set, 保证不会重复记录
+    const jobQueue = new Set()
+    // 使用promise.resolve()创建一个promise示例, 我们将他将一个任务添加到微任务队列
+    const p = Promise.resolve()
+    // 一个标志代表是否在刷新队列
+    let isFlushing = false
+    function flushJob() {
+        if (isFlushing) return
+        isFlushing = true
+        p.then(() => {
+            jobQueue.forEach(job => job())
+        }).finally(() => {
+            isFlushing = false
+        })
+    }
+
+    watchEffectFn(() => {
+        console.log(proxyObj.bar)
+    }, {
+        scheduler(fn) {
+            jobQueue.add(fn)
+            flushJob()
+        }
+    })
+    proxyObj.bar++
+    proxyObj.bar++
+
+    // 数组去重
+    // 方法1
+    let arr = [1, 1, 2, 3, 4, 4, 5, 4, 5, 7, 6, 7, 8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+
+    console.time("代码执行时长");
+    let result = []
+    for (let i = 0; i < arr.length; i++) {
+        if (result.includes(arr[i])) {
+            continue
+        } else {
+            result.push(arr[i])
+        }
+    }
+    // console.log(result)
+    console.timeEnd("代码执行时长");
+
+    // 方法2
+    console.time("代码执行时长");
+    let result1 = null
+    result1 = arr.filter((val, index, arr) => {
+        return arr.indexOf(val) === index
+    })
+    // console.log(result1)
+    console.timeEnd("代码执行时长");
+</script>
+
+</html>
