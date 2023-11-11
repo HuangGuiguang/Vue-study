@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+    过期的副作用函数
+</body>
+<script>
+    // 可调度性指的是可以控制副作用函数的执行时机、次数、方式
+    let activeEffectFn = null
+    const effectStack = []
+    function watchEffectFn(fn, options = {}) {
+        const effectFn = () => {
+            cleanUp(effectFn)
+            activeEffectFn = effectFn
+            effectStack.push(effectFn)
+            const res = fn()
+            effectStack.pop()
+            activeEffectFn = effectStack[effectStack.length - 1]
+            return res
+        }
+        effectFn.options = options // 把options存储
+        effectFn.deps = []
+        if (!options.lazy) {
+            effectFn()
+        }
+        // 将包装后的副作用函数返回, 方便调用
+        return effectFn
+    }
+
+    function cleanUp(fn) {
+        for (let i = 0; i < fn.deps.length; i++) {
+            let deps = fn.deps[i]
+            deps.delete(fn)
+        }
+        fn.deps.length = 0
+    }
+
+    const targetBucket = new WeakMap()
+    const data = { foo: 1, bar: 1 }
+
+    const proxyObj = new Proxy(data, {
+        get: function (target, key, receiver) {
+            // console.log('get')
+            // 需要把副作用函数按照key放进set里
+            track(target, key, receiver)
+            return target[key]
+        },
+        set: function (target, key, newVal, receiver) {
+            // console.log('set')
+            target[key] = newVal
+            // 获取key的对应的副作用函数，并执行
+            trigger(target, key, newVal, receiver)
+            return true
+        }
+    })
+
+    /**
+     * 依赖收集
+     */
+    function track(target, key, receiver) {
+        // console.log(target, key, activeEffectFn);
+        if (!activeEffectFn) return
+        let depsMap = targetBucket.get(target)
+
+        if (!depsMap) {
+            targetBucket.set(target, (depsMap = new Map()))
+        }
+
+        let deps = depsMap.get(key)
+        if (!deps) {
+            depsMap.set(key, (deps = new Set()))
+        }
+
+        if (activeEffectFn) {
+            deps.add(activeEffectFn)
+        }
+
+        activeEffectFn.deps.push(deps) // 存储当前key的set, 意为这个副作用函数影响的keySet集合
+    }
+
+    /**
+     * 触发依赖
+     */
+    function trigger(target, key, newVal, receiver) {
+        // console.log(target, key);
+        const depsMap = targetBucket.get(target)
+        if (!depsMap) return
+        const effects = depsMap.get(key)
+        let effectsToRun = new Set()
+        effects && effects.forEach((effectFn) => {
+            if (effectFn !== activeEffectFn) {
+                effectsToRun.add(effectFn) // 避免无限嵌套
+            }
+        })
+        effectsToRun.forEach(fn => {
+            if (fn.options && fn.options.scheduler) {
+                fn.options.scheduler(fn)
+            } else {
+                fn()
+            }
+        })
+    }
+
+    // 定义一个任务队列, 使用set, 保证不会重复记录
+    const jobQueue = new Set()
+    // 使用promise.resolve()创建一个promise示例, 我们将他将一个任务添加到微任务队列
+    const p = Promise.resolve()
+    // 一个标志代表是否在刷新队列
+    let isFlushing = false
+    function flushJob() {
+        if (isFlushing) return
+        isFlushing = true
+        p.then(() => {
+            jobQueue.forEach(job => job())
+        }).finally(() => {
+            isFlushing = false
+        })
+    }
+
+    // 封装成计算属性函数
+    function computed(getter) {
+        // 添加缓存
+        let value
+        // 用于标识是否需要重新计算值, 为true则意味着"脏", 需要重新计算
+        let dirty = true
+        const effectFn = watchEffectFn(getter, {
+            lazy: true,
+            scheduler() {
+                if (!dirty) {
+                    dirty = true
+                    // 当计算属性依赖的响应式数据变化时，手动调用 trigger 函数触发响应
+                    trigger(obj, 'value')
+                }
+            }
+        })
+
+        const obj = {
+            get value() {
+                // console.log('get');
+                // 因为获取一次值就会收集依赖一次，尽管依赖的值本身没有变化
+                if (dirty) {
+                    // 重新计算
+                    value = effectFn()
+                    dirty = false
+                }
+                // 当读取 value 时，手动调用 track 函数进行追踪
+                track(obj, 'value')
+                return value
+            }
+        }
+
+        return obj
+    }
+
+    function watch(source, cb, options = {}) {
+        let getter
+        let newVal, oldVal
+        if (typeof source === 'function') {
+            getter = source
+        } else {
+            getter = () => traverse(source)
+        }
+        // 第一次不用清除
+        let cleanUp = null
+        let onInvalidate = function (fn) {
+            cleanUp = fn
+        }
+        const job = () => {
+            newVal = effectFn()
+            if (cleanUp) {
+                cleanUp()
+            }
+            cb(newVal, oldVal, onInvalidate)
+            oldVal = newVal
+        }
+        let effectFn = watchEffectFn(
+            getter,
+            {
+                // 能够记录旧值的关键
+                lazy: true,
+                scheduler: () => {
+                    if (options.flush === 'post') {
+                        const p = Promise.resolve()
+                        p.then(job)
+                    } else {
+                        job()
+                    }
+                }
+            }
+        )
+        if (options.immediate) {
+            job()
+        } else {
+            oldVal = effectFn()
+        }
+    }
+    watch(() => proxyObj.foo, async (newVal, oldVal, onInvalidate) => {
+        console.log(newVal, oldVal, '触发了watch')
+        let expired = false
+        // 在下一个请求发起之前把当前的expired置为失效
+        onInvalidate(() => {
+            expired = true
+        })
+
+        const res = await fetch('/path/to/request')
+        if (!expired) {
+            finalData = res
+        }
+    }, {
+        immediate: false,
+        flush: 'post'
+    })
+
+    function traverse(value, seen = new Set()) {
+        // 如果要读取的数据是原始值, 或者已经被读取过了, 那么什么都不做
+        if (typeof value !== 'object' || value === null || seen.has(value)) return
+
+        // 将数据添加到seen中, 代表遍历地读取过了，避免循环引用引起的死循环
+        seen.add(value)
+
+        // 暂时不考虑数组等其他数据结构
+        // 假设value就是一个对象, 使用for...in读取对象地每一个值，并递归地调用traverse进行处理
+        for (const k in value) {
+            traverse(value[k], seen)
+        }
+
+        return value
+    }
+</script>
+
+</html>
