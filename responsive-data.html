@@ -105,22 +105,6 @@
     //     key: new Set()
     //     key2: new Set()
     // }
-
-    // 扁平化数组
-    const arr = [[1, 2, 4], 2, [4, 4, 45], [2, [3, 5, 6]], [[1, 2], [2, 3, [55, 66, 77]]]]
-    console.log(arr.flat(Infinity))
-    // 主要还是concat在起作用
-    function flatArr(arr) {
-        const result = arr.reduce((prev, current) => {
-            if (Object.prototype.toString.call(current) === '[object Array]') {
-                return prev.concat(flatArr(current))
-            } else {
-                return prev.concat(current)
-            }
-        }, [])
-        return result
-    }
-    console.log(flatArr(arr))
 </script>
 
 
@@ -261,6 +245,9 @@
     setTimeout(() => {
         proxyObj.foo = false
     }, 8000)
+
+    // proxyObj.text = 'hello responsive data1'
+    // proxyObj.text = 'hello responsive data1'
 </script>
 
 </html>
