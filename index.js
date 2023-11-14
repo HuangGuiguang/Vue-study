@@ -1,4 +1,5 @@
 /****************数组乱序 */
+"use strict";
 {
     const arr = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
@@ -62,4 +63,26 @@
         return result;
     }
     console.log(flatArr(arr));
+}
+
+{
+    // 简单的柯里化函数
+    function add() {
+        let sum = 0;
+        return function innerFn(num) {
+            if (num !== undefined) {
+                sum += num;
+                return innerFn;
+            } else {
+                return sum;
+            }
+        };
+    }
+
+    console.log(add()(1)(2)(3)()); // 输出 6
+}
+
+{
+    const testObj = { foo: 1 };
+    console.log(Reflect.get(testObj, "foo", { foo: 2 })); // 2
 }
