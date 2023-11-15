@@ -92,13 +92,25 @@
         const depsMap = targetBucket.get(target)
         if (!depsMap) return
         const effects = depsMap.get(key)
+
+        // 取得与ITERATE_KEY相关联的副作用函数集合
+        const iterateEffects = depsMap.get(ITERATE_KEY)
+
         let effectsToRun = new Set()
         effects && effects.forEach((effectFn) => {
             if (effectFn !== activeEffectFn) {
                 effectsToRun.add(effectFn) // 避免无限嵌套
             }
         })
-        effectsToRun.forEach(fn => {
+
+        // 执行for...in 关联的副作用函数集合
+        iterateEffects.forEach(effectFn => {
+            if (effectFn !== activeEffectFn) {
+                effectsToRun.add(effectFn) // 避免无限嵌套
+            }
+        })
+
+        effectsToRun && effectsToRun.forEach(fn => {
             if (fn.options && fn.options.scheduler) {
                 fn.options.scheduler(fn)
             } else {
@@ -238,9 +250,18 @@
             return Reflect.has(target, key)
         },
         // 拦截for...in
-        ownKeys(target, ITERATE_KEY) {
+        ownKeys(target) {
+            console.log('ownKeys');
             track(target, ITERATE_KEY)
             return Reflect.ownKeys(target)
+        },
+        set: function (target, key, newVal, receiver) {
+            // console.log('set')
+            // target[key] = newVal
+            Reflect.set(target, key, newVal, receiver)
+            // 获取key的对应的副作用函数，并执行
+            trigger(target, key, newVal, receiver)
+            return true
         }
     })
 
@@ -252,7 +273,14 @@
     if ('foo' in obj) {
         // ...
     }
-
+    // 在何种情况下需要触发for...in
+    // key的增加或删除下需要触发，而只是修改了ket的value则不需要触发，所以在trigger的时候需要做区分
+    watchEffectFn(() => {
+        for (const key in obj) {
+            console.log(key);
+        }
+    })
+    obj.testForinKey = 2
 
 </script>
 
