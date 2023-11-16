@@ -43,6 +43,11 @@
 
     const targetBucket = new WeakMap()
     const data = { foo: 1, bar: 1 }
+    const TriggerType = {
+        SET: 'SET',
+        ADD: 'ADD',
+        DELETE: 'DELETE'
+    }
 
     const proxyObj = new Proxy(data, {
         get: function (target, key, receiver) {
@@ -87,14 +92,11 @@
     /**
      * 触发依赖
      */
-    function trigger(target, key, newVal, receiver) {
+    function trigger(target, key, newVal, receiver, type) {
         // console.log(target, key);
         const depsMap = targetBucket.get(target)
         if (!depsMap) return
         const effects = depsMap.get(key)
-
-        // 取得与ITERATE_KEY相关联的副作用函数集合
-        const iterateEffects = depsMap.get(ITERATE_KEY)
 
         let effectsToRun = new Set()
         effects && effects.forEach((effectFn) => {
@@ -103,12 +105,16 @@
             }
         })
 
-        // 执行for...in 关联的副作用函数集合
-        iterateEffects.forEach(effectFn => {
-            if (effectFn !== activeEffectFn) {
-                effectsToRun.add(effectFn) // 避免无限嵌套
-            }
-        })
+        if (type === TriggerType.ADD || type === TriggerType.DELETE) {
+            // 取得与ITERATE_KEY相关联的副作用函数集合
+            const iterateEffects = depsMap.get(ITERATE_KEY)
+            // 执行for...in 关联的副作用函数集合
+            iterateEffects.forEach(effectFn => {
+                if (effectFn !== activeEffectFn) {
+                    effectsToRun.add(effectFn) // 避免无限嵌套
+                }
+            })
+        }
 
         effectsToRun && effectsToRun.forEach(fn => {
             if (fn.options && fn.options.scheduler) {
@@ -258,9 +264,25 @@
         set: function (target, key, newVal, receiver) {
             // console.log('set')
             // target[key] = newVal
+            // 如果属性不存在，则说明实在添加新属性，否则是设置已有属性
+            const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
             Reflect.set(target, key, newVal, receiver)
             // 获取key的对应的副作用函数，并执行
-            trigger(target, key, newVal, receiver)
+            trigger(target, key, newVal, receiver, type)
+            return true
+        },
+        // 拦截delete
+        deleteProperty(target, key) {
+            // 检查被删除的属性是都是对象自己的属性
+            const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+
+            // 使用Reflect.deleteProperty完成属性的删除
+            const res = Reflect.deleteProperty(target, key)
+
+            if (res && hadKey) {
+                trigger(target, key, undefined, undefined, 'DELETE')
+            }
+
             return true
         }
     })
@@ -280,8 +302,14 @@
             console.log(key);
         }
     })
+    console.log('--------------触发循环key');
     obj.testForinKey = 2
 
+    console.log('--------------new change keyVal', '看不到循环的key');
+    obj.foo = 500
+
+    console.log('--------------delete key', '循环的key中没有foo')
+    delete obj.foo
 </script>
 
 </html>
