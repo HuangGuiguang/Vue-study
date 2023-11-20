@@ -120,6 +120,35 @@
                 trigger(target, key, undefined, undefined, 'ADD')
             }
             return res
+        },
+        get(key) {
+            const target = this.raw
+            const had = target.has(key)
+            track(target, key)
+            if (had) {
+                const res = target.get(key)
+                return typeof res === 'object' ? receiver(res) : res
+            }
+        },
+        set(key, value) {
+            const target = this.raw
+            const had = target.has(key)
+            const oldVal = target.get(key)
+            const rawValue = value.raw || value
+            target.set(key, rawValue)
+            if (!had) {
+                trigger(target, key, 'ADD')
+            } else if (oldVal !== value || (oldVal === oldVal && value === value)) {
+                trigger(target, key, 'SET')
+            }
+        },
+        forEach(callback, thisArg) {
+            const wrap = (val) => typeof val === 'object' ? reactive(val) : val
+            const target = this.raw
+            track(target, ITERATE_KEY)
+            target.forEach((v, k) => {
+                callback.call(thisArg, wrap(v), wrap(k), this)
+            })
         }
     }
     function createReactive(obj, isShallow = false, isReadonly = false) {
@@ -254,7 +283,7 @@
             }
         })
 
-        if (type === TriggerType.ADD || type === TriggerType.DELETE) {
+        if (type === TriggerType.ADD || type === TriggerType.DELETE || (type === 'SET' && Object.prototype.toString.call(target) === '[object Map]')) {
             // 取得与ITERATE_KEY相关联的副作用函数集合
             const iterateEffects = depsMap.get(ITERATE_KEY)
             // 执行for...in 关联的副作用函数集合
@@ -441,6 +470,13 @@
         console.log(proxyS.size);
     })
     proxyS.add(8)
+
+    // 避免污染原始数据
+    const mapProxy = reactive(new Map([['key', 1]]))
+    watchEffectFn(() => {
+        console.log(mapProxy.get('key'));
+    })
+    mapProxy.set('key', 2)
 </script>
 
 </html>
