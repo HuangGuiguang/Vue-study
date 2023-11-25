@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+</head>
+
+<body>
+    <div id="app"></div>
+</body>
+<script>
+    function createRenderer(options) {
+        const {
+            createElement,
+            setElementText,
+            insert
+        } = options
+        function patch(oldVNode, newVNode, container) {
+            if (!oldVNode) {
+                mountElement(newVNode, container)
+            } else {
+                // n1存在，意味着要打补丁，暂时省略
+            }
+        }
+
+        // 添加节点
+        function mountElement(vNode, container) {
+            // const el = document.createElement(vNode.type)
+            const el = createElement(vNode.type)
+            // 处理子节点
+            if (typeof vNode.children === 'string') {
+                // el.textContent = vNode.children
+                setElementText(el, vNode.children)
+            }
+
+            // container.appendChild(el)
+            insert(el, container)
+        }
+
+        function render(vNode, container) {
+            if (vNode) {
+                // 如果传入了新vnode, 将其与旧vnode一起传递给patch函数，进行打补丁
+                patch(container._vNode, vNode, container)
+            } else {
+                // 没传新vnode，且有旧节点存在，则卸载
+                if (container._vNode) {
+                    container.innerHTML = ''
+                }
+            }
+            container._vNode = vNode
+        }
+
+        return {
+            render
+        }
+    }
+    const renderer = createRenderer({
+        createElement(tagName) {
+            console.log(`创建${tagName}元素`);
+            return document.createElement(tagName)
+        },
+        setElementText(el, text) {
+            console.log(`设置${JSON.stringify(el)}的内容为${text}`);
+            el.textContent = text
+        },
+        insert(el, parent, anchor = null) {
+            console.log(`将${JSON.stringify(el)}添加到${JSON.stringify(parent)}`);
+            parent.appendChild(el)
+        }
+    })
+    const vNode = {
+        type: 'h2',
+        children: 'hello'
+    }
+    renderer.render(vNode, document.querySelector("#app"))
+    // renderer.render(newVNode, document.querySelector("#app"))
+</script>
+
+</html>

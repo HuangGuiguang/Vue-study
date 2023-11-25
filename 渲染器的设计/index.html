@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <!-- <script>
+        // 可调度性指的是可以控制副作用函数的执行时机、次数、方式
+        let activeEffectFn = null
+        const effectStack = []
+        function watchEffectFn(fn, options = {}) {
+            const effectFn = () => {
+                cleanUp(effectFn)
+                activeEffectFn = effectFn
+                effectStack.push(effectFn)
+                const res = fn()
+                effectStack.pop()
+                activeEffectFn = effectStack[effectStack.length - 1]
+                return res
+            }
+            effectFn.options = options // 把options存储
+            effectFn.deps = []
+            if (!options.lazy) {
+                effectFn()
+            }
+            // 将包装后的副作用函数返回, 方便调用
+            return effectFn
+        }
+
+        function cleanUp(fn) {
+            for (let i = 0; i < fn.deps.length; i++) {
+                let deps = fn.deps[i]
+                deps.delete(fn)
+            }
+            fn.deps.length = 0
+        }
+
+        const targetBucket = new WeakMap()
+        const data = { foo: 1, bar: NaN }
+        const TriggerType = {
+            SET: 'SET',
+            ADD: 'ADD',
+            DELETE: 'DELETE'
+        }
+        const ITERATE_KEY = Symbol()
+
+        // 浅深响应通过传递isShallow实现
+        function shallowReactive(obj) {
+            return createReactive(obj, true)
+        }
+
+        const reactiveMap = new Map()
+        function reactive(obj) {
+            const existProxy = reactiveMap.get(obj)
+            if (existProxy) return existProxy
+
+            const proxy = createReactive(obj)
+            reactiveMap.set(obj, proxy)
+            return proxy
+        }
+
+        // 深只读, 所有的属性都只能读
+        function readonly(obj) {
+            return createReactive(obj, false, true)
+        }
+
+        // 浅只读, 只有最外层的属性才是只读的
+        function shallowReadOnly(obj) {
+            return createReactive(obj, true, true)
+        }
+
+        function ref(value) {
+            const wrapper = {
+                value
+            }
+            // 区分是代理的对象是包装过的还是没包装过的
+            Object.defineProperty(wrapper, '_v_isRef', { value: true })
+            return reactive(wrapper)
+        }
+
+        function toRef(obj, key) {
+            const wrapper = {
+                get value() {
+                    return obj[key]
+                },
+                set value(val) {
+                    obj[key] = val
+                }
+            }
+            Object.defineProperty(wrapper, '_v_isRef', {
+                value: true
+            })
+            return wrapper
+        }
+
+        function toRefs(obj) {
+            const result = {}
+            for (const key in obj) {
+                result[key] = toRef(obj, key)
+            }
+            return result
+        }
+
+        const arrayInstrumentations = {}
+
+            ;['includes', 'indexOf', 'lastIndexOf'].forEach(method => {
+                const originMethod = Array.prototype[method]
+                arrayInstrumentations[method] = function (...args) {
+                    // this 是代理对象，先在代理对象中查找，将结果存储到 res 中
+                    let res = originMethod.apply(this, args)
+
+                    if (res === false || res === -1) {
+                        // res 为 false 说明没找到，在通过 this.raw 拿到原始数组，再去原始数组中查找，并更新 res 值
+                        res = originMethod.apply(this.raw, args)
+                    }
+                    // 返回最终的结果
+                    return res
+                }
+            })
+        let shouldTrack = true
+            ;['push', 'pop', 'shift', 'unshift', 'splice'].forEach(method => {
+                const originMethod = Array.prototype[method]
+                arrayInstrumentations[method] = function (...args) {
+                    shouldTrack = false
+                    let res = originMethod.apply(this, args)
+                    shouldTrack = true
+                    return res
+                }
+            })
+
+        const mutableInstrumentations = {
+            add(key) {
+                const target = this.raw
+                const hadKey = target.has(key)
+                const res = target.add(key)
+                if (!hadKey) {
+                    trigger(target, key, undefined, undefined, 'ADD')
+                }
+                return res
+            },
+            delete(key) {
+                const target = this.raw
+                const hadKey = target.has(key)
+                const res = target.delete(key)
+                if (!hadKey) {
+                    trigger(target, key, undefined, undefined, 'ADD')
+                }
+                return res
+            },
+            get(key) {
+                const target = this.raw
+                const had = target.has(key)
+                track(target, key)
+                if (had) {
+                    const res = target.get(key)
+                    return typeof res === 'object' ? receiver(res) : res
+                }
+            },
+            set(key, value) {
+                const target = this.raw
+                const had = target.has(key)
+                const oldVal = target.get(key)
+                const rawValue = value.raw || value
+                target.set(key, rawValue)
+                if (!had) {
+                    trigger(target, key, 'ADD')
+                } else if (oldVal !== value || (oldVal === oldVal && value === value)) {
+                    trigger(target, key, 'SET')
+                }
+            },
+            forEach(callback, thisArg) {
+                const wrap = (val) => typeof val === 'object' ? reactive(val) : val
+                const target = this.raw
+                track(target, ITERATE_KEY)
+                target.forEach((v, k) => {
+                    callback.call(thisArg, wrap(v), wrap(k), this)
+                })
+            }
+        }
+        function createReactive(obj, isShallow = false, isReadonly = false) {
+            return new Proxy(obj, {
+                get: function (target, key, receiver) {
+                    if (key === 'raw') {
+                        return target
+                    }
+
+                    if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(key)) {
+                        return Reflect.get(arrayInstrumentations, key, receiver)
+                    }
+
+                    // if (key === 'size') {
+                    //     track(target, ITERATE_KEY)
+                    //     return Reflect.get(target, key, target)
+                    // }
+                    // return mutableInstrumentations[key]
+
+                    // 非只读的时候才需要建立联系
+                    if (!isReadonly && typeof key != 'symbol') { // for...of是会读取数组的Symbol.iterator属性, 不用追踪
+                        track(target, key, receiver)
+                    }
+
+                    const res = Reflect.get(target, key, receiver)
+
+                    if (isShallow) {
+                        return res
+                    }
+
+                    // 深响应的关键, 如果值是一个对象, 那么返回值也要包装成响应式对象
+                    if (typeof res === 'object' && res !== null) {
+                        return isReadonly ? readonly(res) : reactive(res)
+                    }
+                    return res
+                },
+                // 通过has来拦截in操作
+                has(target, key) {
+                    console.log('has');
+                    track(target, key)
+                    return Reflect.has(target, key)
+                },
+                // 拦截for...in
+                ownKeys(target) {
+                    console.log('ownKeys');
+                    Array.isArray(target) ? track(target, 'length') : track(target, ITERATE_KEY) // 数组拦截的是length属性, 对象拦截的是自定义key
+                    return Reflect.ownKeys(target)
+                },
+                set: function (target, key, newVal, receiver) {
+                    if (isReadonly) {
+                        console.log(key + '是只读的')
+                        return true
+                    }
+                    // 先获取旧值
+                    const oldVal = target[key]
+
+                    const type = Array.isArray(target)
+                        ? (Number(key) < target.length ? TriggerType.SET : TriggerType.ADD) // 如果是数组, 设置的key大于等于长度值, 为add，否则为set
+                        : Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD // 如果属性不存在，则说明是在添加新属性，否则是设置已有属性
+                    Reflect.set(target, key, newVal, receiver)
+
+                    if (target === receiver.raw) {
+                        // 比较旧值和传进来的新值
+                        // console.log(oldVal, newVal);
+                        if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+                            // 获取key的对应的副作用函数，并执行
+                            trigger(target, key, newVal, receiver, type)
+                        }
+                    }
+
+                    return true
+                },
+                // 拦截delete
+                deleteProperty(target, key) {
+                    if (isReadonly) {
+                        console.warn(`属性 ${key} 是只读的`)
+                        return true
+                    }
+                    // 检查被删除的属性是都是对象自己的属性
+                    const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+
+                    // 使用Reflect.deleteProperty完成属性的删除
+                    const res = Reflect.deleteProperty(target, key)
+
+                    if (res && hadKey) {
+                        trigger(target, key, undefined, undefined, 'DELETE')
+                    }
+
+                    return true
+                }
+            })
+        }
+        const proxyObj = reactive(data)
+
+        /**
+         * 依赖收集
+         */
+        function track(target, key, receiver) {
+            // console.log(target, key, activeEffectFn);
+            if (!activeEffectFn || !shouldTrack) return
+            let depsMap = targetBucket.get(target)
+
+            if (!depsMap) {
+                targetBucket.set(target, (depsMap = new Map()))
+            }
+
+            let deps = depsMap.get(key)
+            if (!deps) {
+                depsMap.set(key, (deps = new Set()))
+            }
+
+            if (activeEffectFn) {
+                deps.add(activeEffectFn)
+            }
+
+            activeEffectFn.deps.push(deps) // 存储当前key的set, 意为这个副作用函数影响的keySet集合
+        }
+
+        /**
+         * 触发依赖
+         */
+        function trigger(target, key, newVal, receiver, type) {
+            // console.log(target, key);
+            const depsMap = targetBucket.get(target)
+            if (!depsMap) return
+            const effects = depsMap.get(key)
+
+            let effectsToRun = new Set()
+            effects && effects.forEach((effectFn) => {
+                if (effectFn !== activeEffectFn) {
+                    effectsToRun.add(effectFn) // 避免无限嵌套
+                }
+            })
+
+            if (type === TriggerType.ADD || type === TriggerType.DELETE || (type === 'SET' && Object.prototype.toString.call(target) === '[object Map]')) {
+                // 取得与ITERATE_KEY相关联的副作用函数集合
+                const iterateEffects = depsMap.get(ITERATE_KEY)
+                // 执行for...in 关联的副作用函数集合
+                iterateEffects && iterateEffects.forEach(effectFn => {
+                    if (effectFn !== activeEffectFn) {
+                        effectsToRun.add(effectFn) // 避免无限嵌套
+                    }
+                })
+            }
+
+            // 当给数组添加值时, 触发和length有关的副作用函数
+            if (type === TriggerType.ADD && Array.isArray(target)) {
+                const lengthEffects = depsMap.get('length')
+                lengthEffects && lengthEffects.forEach(effectFn => {
+                    if (effectFn !== activeEffectFn) {
+                        effectsToRun.add(effectFn) // 避免无限嵌套
+                    }
+                })
+            }
+
+            // console.log(target);
+            // 如果是数组且更新了length的情况下, 对于key值>=新length值的项都需要触发依赖, 其值其实就是变成了undefined
+            if (Array.isArray(target) && key === 'length') {
+                depsMap.forEach((effects, key) => {
+                    if (key >= newVal) {
+                        effects.forEach(effectFn => {
+                            if (effectFn !== activeEffectFn) {
+                                effectsToRun.add(effectFn) // 避免无限嵌套
+                            }
+                        })
+                    }
+                })
+            }
+
+            effectsToRun && effectsToRun.forEach(fn => {
+                if (fn.options && fn.options.scheduler) {
+                    fn.options.scheduler(fn)
+                } else {
+                    fn()
+                }
+            })
+        }
+
+        // 定义一个任务队列, 使用set, 保证不会重复记录
+        const jobQueue = new Set()
+        // 使用promise.resolve()创建一个promise示例, 我们将他将一个任务添加到微任务队列
+        const p = Promise.resolve()
+        // 一个标志代表是否在刷新队列
+        let isFlushing = false
+        function flushJob() {
+            if (isFlushing) return
+            isFlushing = true
+            p.then(() => {
+                jobQueue.forEach(job => job())
+            }).finally(() => {
+                isFlushing = false
+            })
+        }
+
+        // 封装成计算属性函数
+        function computed(getter) {
+            // 添加缓存
+            let value
+            // 用于标识是否需要重新计算值, 为true则意味着"脏", 需要重新计算
+            let dirty = true
+            const effectFn = watchEffectFn(getter, {
+                lazy: true,
+                scheduler() {
+                    if (!dirty) {
+                        dirty = true
+                        // 当计算属性依赖的响应式数据变化时，手动调用 trigger 函数触发响应
+                        trigger(obj, 'value')
+                    }
+                }
+            })
+
+            const obj = {
+                get value() {
+                    // console.log('get');
+                    // 因为获取一次值就会收集依赖一次，尽管依赖的值本身没有变化
+                    if (dirty) {
+                        // 重新计算
+                        value = effectFn()
+                        dirty = false
+                    }
+                    // 当读取 value 时，手动调用 track 函数进行追踪
+                    track(obj, 'value')
+                    return value
+                }
+            }
+
+            return obj
+        }
+
+        function watch(source, cb, options = {}) {
+            let getter
+            let newVal, oldVal
+            if (typeof source === 'function') {
+                getter = source
+            } else {
+                getter = () => traverse(source)
+            }
+            // 第一次不用清除
+            let cleanUp = null
+            let onInvalidate = function (fn) {
+                cleanUp = fn
+            }
+            const job = () => {
+                newVal = effectFn()
+                if (cleanUp) {
+                    cleanUp()
+                }
+                cb(newVal, oldVal, onInvalidate)
+                oldVal = newVal
+            }
+            let effectFn = watchEffectFn(
+                getter,
+                {
+                    // 能够记录旧值的关键
+                    lazy: true,
+                    scheduler: () => {
+                        if (options.flush === 'post') {
+                            const p = Promise.resolve()
+                            p.then(job)
+                        } else {
+                            job()
+                        }
+                    }
+                }
+            )
+            if (options.immediate) {
+                job()
+            } else {
+                oldVal = effectFn()
+            }
+        }
+
+        function traverse(value, seen = new Set()) {
+            // 如果要读取的数据是原始值, 或者已经被读取过了, 那么什么都不做
+            if (typeof value !== 'object' || value === null || seen.has(value)) return
+
+            // 将数据添加到seen中, 代表遍历地读取过了，避免循环引用引起的死循环
+            seen.add(value)
+
+            // 暂时不考虑数组等其他数据结构
+            // 假设value就是一个对象, 使用for...in读取对象地每一个值，并递归地调用traverse进行处理
+            for (const k in value) {
+                traverse(value[k], seen)
+            }
+
+            return value
+        }
+    </script> -->
+    <script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+</head>
+
+<body>
+    <div id="app"></div>
+</body>
+
+<script>
+    const { effect, ref } = VueReactivity
+    function renderer(domString, container) {
+        container.innerHTML = domString
+    }
+    renderer(`<h1>Hello</h1>`, document.getElementById('app'))
+
+    const count = ref(1)
+    effect(() => {
+        renderer(`<h1>${count.value}</h1>`, document.getElementById('app'))
+    })
+    setTimeout(() => {
+        count.value = 2
+    }, 5000)
+</script>
+
+</html>
