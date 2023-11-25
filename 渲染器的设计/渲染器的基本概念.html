@@ -12,12 +12,18 @@
     <div id="app"></div>
 </body>
 <script>
+    function shouldSetAsProps(el, key, value) {
+        if (key === 'form' && el.tagName === 'INPUT') return false
+        return key in el
+    }
     function createRenderer(options) {
         const {
             createElement,
             setElementText,
-            insert
+            insert,
+            patchProps
         } = options
+
         function patch(oldVNode, newVNode, container) {
             if (!oldVNode) {
                 mountElement(newVNode, container)
@@ -34,6 +40,17 @@
             if (typeof vNode.children === 'string') {
                 // el.textContent = vNode.children
                 setElementText(el, vNode.children)
+            } else if (Array.isArray(vNode.children)) {
+                vNode.children.forEach(child => {
+                    patch(null, child, el)
+                })
+            }
+
+            if (vNode.props) {
+                for (const key in vNode.props) {
+                    const value = vNode.props[key]
+                    patchProps(el, key, null, value)
+                }
             }
 
             // container.appendChild(el)
@@ -69,14 +86,62 @@
         insert(el, parent, anchor = null) {
             console.log(`将${JSON.stringify(el)}添加到${JSON.stringify(parent)}`);
             parent.appendChild(el)
+        },
+        patchProps(el, key, prevValue, nextValue) {
+            if (shouldSetAsProps(el, key, nextValue)) {
+                const type = typeof el[key]
+
+                if (type === 'boolean' && nextValue === '') {
+                    el[key] = true
+                } else {
+                    el[key] = nextValue
+                }
+            } else {
+                el.setAttribute(key, nextValue)
+            }
         }
     })
     const vNode = {
         type: 'h2',
         children: 'hello'
     }
-    renderer.render(vNode, document.querySelector("#app"))
+    // renderer.render(vNode, document.querySelector("#app"))
     // renderer.render(newVNode, document.querySelector("#app"))
+
+    const vNode2 = {
+        type: 'div',
+        props: {
+            id: 'foo'
+        },
+        children: [
+            {
+                type: 'p',
+                children: 'vue'
+            },
+            {
+                type: 'button',
+                props: {
+                    disabled: ''
+                },
+                children: 'testBtn'
+            },
+            {
+                type: 'form',
+                props: {
+                    id: 'form1'
+                },
+                children: [
+                    {
+                        type: 'input',
+                        props: {
+                            form: 'form1'
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    renderer.render(vNode2, document.querySelector("#app"))
 </script>
 
 </html>
