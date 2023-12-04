@@ -199,6 +199,7 @@
 
         function patch(oldVNode, newVNode, container) {
             if (oldVNode && oldVNode.type !== newVNode.type) {
+                console.log('oldVNode && oldVNode.type !== newVNode.type', newVNode);
                 unMounted(oldVNode)
                 oldVNode = null
             }
@@ -206,15 +207,44 @@
             const { type } = newVNode
             if (typeof type === 'string') {
                 if (!oldVNode) {
+                    console.log('string!oldVNode');
                     mountElement(newVNode, container)
                 } else {
                     // n1存在，意味着要打补丁，暂时省略
                     patchElement(oldVNode, newVNode)
                 }
+            } else if (type === Text) {
+                console.log('type === Text');
+                if (!oldVNode) {
+                    const el = newVNode.el = document.createTextNode(newVNode.children)
+                    insert(el, container)
+                } else {
+                    const el = newVNode.el = oldVNode.el
+                    if (newVNode.child !== oldVNode.children) {
+                        el.nodeValue = newVNode.children
+                    }
+                }
+            } else if (type === Comment) {
+                console.log('type === Comment');
+                if (!oldVNode) {
+                    const el = newVNode.el = document.createComment(newVNode.children)
+                    insert(el, container)
+                } else {
+                    const el = newVNode.el = oldVNode.el
+                    if (newVNode.child !== oldVNode.children) {
+                        el.nodeValue = newVNode.children
+                    }
+                }
+            } else if (type === Fragment) {
+                console.log('type === Fragment');
+                if (!oldVNode) {
+                    console.log('!oldVNode');
+                    newVNode.children.forEach(c => patch(null, c, container))
+                } else {
+                    patchChildren(oldVNode, newVNode, container)
+                }
             } else if (typeof type === 'object') {
                 // 如果newVNode的类型是对象，则它描述的是对象
-            } else if (typeof type === 'xxx') {
-
             }
 
         }
@@ -296,6 +326,10 @@
         }
 
         function unMounted(vNode) {
+            if (vNode.type === Fragment) {
+                vNode.children.forEach(c => unMounted(c))
+                return
+            }
             const parent = vNode.el.parentNode
             if (parent) {
                 parent.removeChild(vNode.el)
@@ -396,7 +430,9 @@
     const { effect, ref } = VueReactivity
 
     const bol = ref(false)
-
+    const Text = Symbol()
+    const Comment = Symbol()
+    const Fragment = Symbol()
     effect(() => {
         const vnode = {
             type: 'div',
@@ -418,6 +454,22 @@
                         }
                     },
                     children: 'text'
+                },
+                {
+                    type: Text,
+                    children: '我是文本内容'
+                },
+                {
+                    type: Comment,
+                    children: '我是注释内容'
+                },
+                {
+                    type: Fragment,
+                    children: [
+                        { type: 'li', children: 'fragment1' },
+                        { type: 'li', children: 'fragment2' },
+                        { type: 'li', children: 'fragment3' }
+                    ]
                 }
             ]
         }
