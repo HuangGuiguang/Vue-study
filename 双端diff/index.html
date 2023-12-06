@@ -142,7 +142,11 @@
             let newEndVNode = newChildren[newEndIdx]
 
             while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
-                if (oldStartVNode.key === newStartVNode.key) {
+                if (!oldStartVNode) {
+                    oldStartVNode = oldChildren[++oldStartIdx]
+                } else if (!oldEndVNode) {
+                    oldEndVNode = oldChildren[--oldEndIdx]
+                } else if (oldStartVNode.key === newStartVNode.key) {
                     // 头头比较
                     patch(oldStartVNode, newStartVNode, container)
 
@@ -158,10 +162,11 @@
                 } else if (oldStartVNode.key === newEndVNode.key) {
                     // 旧头新尾比较
                     patch(oldStartVNode, newEndVNode, container)
-                    insert(oldStartVNode.el, container, oldEndVNode.el)
+                    // 插到最后
+                    insert(oldStartVNode.el, container, oldEndVNode.el.nextSibling)
 
                     oldStartVNode = oldChildren[++oldStartIdx]
-                    newEndVNode = newChildren[--newStartIdx]
+                    newEndVNode = newChildren[--newEndIdx]
                 } else if (oldEndVNode.key === newStartVNode.key) {
                     // 旧尾新头比较
                     patch(oldEndVNode, newStartVNode, container)
@@ -172,6 +177,38 @@
                     // 移动完之后更新索引值，指向下一个位置
                     oldEndVNode = oldChildren[--oldEndIdx]
                     newStartVNode = newChildren[++newStartIdx]
+                } else {
+                    // 头头、尾尾、头尾、尾头都没有命中，就直接找
+                    const idxInOld = oldChildren.findIndex(node => node.key === newStartVNode.key) // 移动到开头
+                    if (idxInOld > 0) {
+                        const oldNodeToMove = oldChildren[idxInOld]
+                        patch(oldNodeToMove, newStartVNode, container)
+                        // 插到最前面
+                        insert(oldNodeToMove.el, container, oldStartVNode.el)
+
+                        // 值为空
+                        oldChildren[idxInOld] = undefined
+                    } else {
+                        // 没找到，说明是新增的节点
+                        patch(null, newStartVNode, container, oldStartVNode.el)
+                    }
+                    // 移动新队列的开始索引
+                    newStartVNode = newChildren[++newStartIdx]
+                }
+            }
+
+            if (oldEndIdx < oldStartIdx && newStartIdx <= newEndIdx) {
+                // 遗漏节点的情况
+                // 如 1 2 3 -> 4 1 2 3
+                for (let i = newStartIdx; i <= newEndIdx; i++) {
+                    patch(null, newChildren[i], container, oldStartVNode.el)
+                }
+            } else if (newEndIdx < newStartIdx && oldStartIdx <= oldEndIdx) {
+                console.log('old has left', newStartIdx, newEndIdx);
+                // 旧子节点列表有多余的情况
+                // 1 2 3 - 1 3
+                for (let i = oldStartIdx; i <= oldEndIdx; i++) {
+                    unMounted(oldChildren[i])
                 }
             }
         }
@@ -305,10 +342,10 @@
             id: 'parent'
         },
         children: [
-            { type: 'p', children: 'p1before', key: 1 },
-            { type: 'p', children: 'p2before', key: 2 },
-            { type: 'p', children: 'p3before', key: 3 },
-            { type: 'p', children: 'p5before', key: 5 }
+            { type: 'p', children: 'p1', key: 1 },
+            { type: 'p', children: 'p2', key: 2 },
+            { type: 'p', children: 'p3', key: 3 },
+            // { type: 'p', children: 'p4', key: 4 }
         ]
     }
     renderer.render(vNode, document.querySelector("#app"))
@@ -321,13 +358,11 @@
                 },
                 id: 'parent'
             },
-            // 调换了顺序，其中一个更改了文字
             children: [
-                { type: 'p', children: 'p3after', key: 3 },
-                { type: 'p', children: 'p1before', key: 1 },
-                { type: 'p', children: 'p4After', key: 4 },
-                { type: 'p', children: 'p2before', key: 2 }
-
+                // { type: 'p', children: 'p4After', key: 4 },
+                { type: 'p', children: 'p1After', key: 1 },
+                { type: 'p', children: 'p3After', key: 3 },
+                // { type: 'p', children: 'p23After', key: 2 }
             ]
         }
         renderer.render(vNode, document.querySelector("#app"))
