@@ -210,11 +210,11 @@
 
                     if (patched <= count) {
                         const k = keyIndex[oldVNode.key]
-                        if (typeof k !== undefined) {
+                        if (typeof k !== 'undefined') {
                             newVNode = newChildren[k]
 
                             patch(oldVNode, newVNode, container)
-
+                            patched++
                             source[k - newStart] = i
                             // 判断节点是否需要移动
                             if (k < pos) {
@@ -230,7 +230,92 @@
                         unMounted(oldVNode)
                     }
                 }
+
+                if (moved) {
+                    // 需要移动
+                    // 计算最长递增子序列
+                    const seq = lis(source)
+
+                    // s指向最长递增子序列的最后一个元素
+                    let s = seq.length - 1
+                    // i指向新的一组子节点的最后一个元素
+                    let i = count - 1
+                    for (i; i >= 0; i--) {
+                        if (source[i] === -1) {
+                            // 需要新增
+                            // 该节点在新children的真实位置索引
+                            const pos = i + newStart
+                            const newVNode = newChildren[pos]
+
+                            // 该节点的下一个节点的位置索引
+                            const nextPos = pos + 1
+                            // 锚点
+                            const anchor = nextPos < newChildren.length ? newChildren[nextPos].el : null
+                            patch(null, newVNode, container, anchor)
+                        } else if (i !== seq[s]) {
+                            // 如果节点的索引i不等于seq[s]的值，说明该节点需要移动
+                            // 说明该节点需要移动
+                            // 该节点在新的一组子节点中的真实位置索引
+                            const pos = i + newStart
+                            const newVNode = newChildren[pos]
+                            // 该节点的下一个节点的位置索引
+                            const nextPos = pos + 1
+                            // 锚点
+                            const anchor = nextPos < newChildren.length
+                                ? newChildren[nextPos].el
+                                : null
+                            // 移动
+                            insert(newVNode.el, container, anchor)
+
+                        } else {
+                            // 当i === seq[s]时，说明该位置的节点不需要移动
+                            // 只需要让s指向下一个位置
+                            s--
+                        }
+                    }
+                }
             }
+        }
+
+        function lis(arr) {
+            const p = arr.slice()
+            const result = [0]
+            let i, j, u, v, c
+            const len = arr.length
+            for (i = 0; i < len; i++) {
+                const arrI = arr[i]
+                if (arrI !== 0) {
+                    j = result[result.length - 1]
+                    if (arr[j] < arrI) {
+                        p[i] = j
+                        result.push(i)
+                        continue
+                    }
+                    u = 0
+                    v = result.length - 1
+                    while (u < v) {
+                        c = ((u + v) / 2) | 0
+                        if (arr[result[c]] < arrI) {
+                            u = c + 1
+                        } else {
+                            v = c
+                        }
+                    }
+                    if (arrI < arr[result[u]]) {
+                        if (u > 0) {
+                            p[i] = result[u - 1]
+                        }
+                        result[u] = i
+                    }
+                }
+            }
+            u = result.length
+            v = result[u - 1]
+            while (u-- > 0) {
+                result[u] = v
+                v = p[v]
+            }
+            return result
         }
 
         // 添加节点
@@ -365,6 +450,9 @@
             { type: 'p', children: 'p1', key: 1 },
             { type: 'p', children: 'p2', key: 2 },
             { type: 'p', children: 'p3', key: 3 },
+            { type: 'p', children: 'p4', key: 4 },
+            { type: 'p', children: 'p6', key: 6 },
+            { type: 'p', children: 'p5', key: 5 },
             // { type: 'p', children: 'p4', key: 4 }
         ]
     }
@@ -379,10 +467,17 @@
                 id: 'parent'
             },
             children: [
-                { type: 'p', children: 'p1After', key: 1 },
-                // { type: 'p', children: 'p4After', key: 4 },
-                // { type: 'p', children: 'p2After', key: 2 },
-                { type: 'p', children: 'p3After', key: 3 }
+                // { type: 'p', children: 'p1After', key: 1 },
+                // // { type: 'p', children: 'p4After', key: 4 },
+                // // { type: 'p', children: 'p2After', key: 2 },
+                // { type: 'p', children: 'p3After', key: 3 }
+
+                { type: 'p', children: 'p1', key: 1 },
+                { type: 'p', children: 'p3', key: 3 },
+                { type: 'p', children: 'p4', key: 4 },
+                { type: 'p', children: 'p2', key: 2 },
+                { type: 'p', children: 'p7', key: 7 },
+                { type: 'p', children: 'p5', key: 5 },
             ]
         }
         renderer.render(vNode, document.querySelector("#app"))
