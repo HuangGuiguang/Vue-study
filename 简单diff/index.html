@@ -114,12 +114,6 @@
                     // 分为三种情况， n1和n2长度相等，n1比n2多(需要卸载部分节点)，n2比n1多（需要增加部分节点）
                     const oldChildren = n1.children
                     const newChildren = n2.children
-                    const oldLen = oldChildren.length
-                    const newLen = newChildren.length
-                    const commonLength = Math.min(oldLen, newLen)
-                    // for (let i = 0; i < commonLength; i++) {
-                    //     patch(oldChildren[i], newChildren[i], container)
-                    // }
                     let lastIndex = 0
                     // 其实就是应该是递增的，如果找到的是小于上一个的，那就说明要移动
                     for (let i = 0; i < newChildren.length; i++) {
