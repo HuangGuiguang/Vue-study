@@ -423,8 +423,20 @@
                 subTree: null
             }
 
+            // 定义
+            function emit(event, ...payload) {
+                const eventName = `on${event[0].toUpperCase() + event.slice(1)}` // change --> onChange
+                // 找到对应的事件函数
+                const handler = instance.props[eventName]
+                if (handler) {
+                    handler(...payload)
+                } else {
+                    console.error('event not exist');
+                }
+            }
+
             // setupContext
-            const setupContext = { attrs }
+            const setupContext = { attrs, emit }
 
             // 调用setup函数, 将只读版本的props作为第一个参数传递，避免用户意外地修改props的值
             // 将setupContext
@@ -512,7 +524,7 @@
 
             // 遍历为组件传递的props数据
             for (const key in propsData) {
-                if (key in options) {
+                if (key in options || key.startsWith('on')) {
                     // 如果为组件传递的props数据在组件自身的props选项中有定义, 则将其视为合法的props
                     props[key] = propsData[key]
                 } else {
@@ -650,7 +662,8 @@
             console.log('updated');
         },
 
-        setup() {
+        setup(props, { emit }) {
+            emit('change', 1, 2)
             return function () {
                 return {
                     type: 'div',
@@ -673,6 +686,9 @@
         type: MyComponent,
         props: {
             title: 'A big Title',
+            onChange: (param1, param2) => {
+                console.log(param1, param2);
+            }
         },
     }
     renderer.render(CompVNode, document.querySelector("#app"))
