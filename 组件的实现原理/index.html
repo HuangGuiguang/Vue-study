@@ -367,16 +367,45 @@
             // 通过vNode获取组件的选项对象, 即vNode.type
             const componentOptions = vNode.type
             // 获取组件的渲染函数render
-            const { render, data } = componentOptions
+            const { render, data, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated } = componentOptions
+
+            // 在这里调用beforeCreate钩子, 不绑定this，这就是为什么beforeCreate中访问不到this的缘故
+            beforeCreate && beforeCreate()
             // 包装data为响应式数据
             const state = reactive(data())
+
+            // 定义组件实例， 一个组件本质上就是一个对象，它包含与组件有关的状态信息
+            const instance = {
+                state,
+                isMounted: false,
+                subTree: null
+            }
+
+            vNode.component = instance
+
+            // 在这里调用created钩子
+            created && created.call(state)
             // 执行渲染函数, 获取组件要渲染的内容
             // 绑定this为data返回的对象
             // 再将patch函数作为副作用函数
             effect(() => {
-                console.log('update');
                 const subTree = render.call(state, state)
-                patch(null, subTree, container, anchor)
+
+                if (!instance.isMounted) {
+                    // 在这里调用beforeMounted钩子
+                    beforeMount && beforeMount.call(state)
+                    patch(null, subTree, container, anchor)
+                    instance.isMounted = true
+                    // 在这里调用mounted钩子
+                    mounted && mounted.call(state)
+                } else {
+                    // 在这里调用beforeUpdate钩子
+                    beforeUpdate && beforeUpdate.call(state)
+                    patch(instance.subTree, subTree, container, anchor)
+                    // 在这里调用updated钩子
+                    updated && updated.call(state)
+                }
+                instance.subTree = subTree
             }, {
                 scheduler: queueJob
             })
@@ -481,7 +510,34 @@
                 foo: 'hello world'
             }
         },
+        beforeCreate() {
+            console.log('beforeCreate');
+        },
+
+        created() {
+            console.log('created');
+        },
+
+        beforeMount() {
+            console.log('beforeMount');
+        },
+
+        mounted() {
+            console.log('mounted');
+        },
+
+        beforeUpdate() {
+            console.log('beforeUpdate');
+        },
+
+        updated() {
+            console.log('updated');
+        },
+
         render() {
+            setTimeout(() => {
+                this.foo = 'hi'
+            }, 3000)
             return {
                 type: 'div',
                 children: '我是foo文本内容:' + this.foo
