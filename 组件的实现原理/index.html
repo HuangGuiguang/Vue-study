@@ -12,7 +12,7 @@
     <div id="app"></div>
 </body>
 <script>
-    const { reactive, effect, ref } = VueReactivity
+    const { reactive, effect, ref, shallowReactive } = VueReactivity
     function shouldSetAsProps(el, key, value) {
         if (key === 'form' && el.tagName === 'INPUT') return false
         return key in el
@@ -126,8 +126,44 @@
             patchChildren(n1, n2, el)
         }
 
-        function patchComponent(n1, n2) {
+        function patchComponent(n1, n2, anchor) {
+            // 获取组件实例, 即n1.component, 同时让新的组件虚拟节点n2.component也指向组件实例
+            const instance = (n2.component = n1.component)
 
+            // 获取当前的props数据
+            const { props } = instance
+
+            // 调用hasPropsChanged检查给子组件传递的props是否发生变化，如果没有变化，则不需要更新
+            if (hasPropsChanged(n1.props, n2.props)) {
+                // 调用resolveProps函数重新获取props数据
+                const [nextProps] = resolveProps(n2.type.props, n2.props)
+                // 更新props
+                for (const k in nextProps) {
+                    props[k] = nextProps[k]
+                }
+
+                // 删除不存在的props
+                for (const k in props) {
+                    if (!(k in nextProps)) delete props[k]
+                }
+            }
+        }
+
+        function hasPropsChanged(prevProps, nextProps) {
+            const nextKeys = Object.keys(nextProps)
+            const prevKeys = Object.keys(prevProps)
+
+            // 如果新旧props的数量变了，则说明有变化
+            if (nextKeys.length !== prevKeys.length) {
+                return true
+            }
+
+            for (let i = 0; i < nextKeys.length; i++) {
+                const key = nextKeys[i]
+                if (nextProps[key] !== prevProps[key]) return true
+            }
+
+            return false
         }
 
         function patchChildren(n1, n2, container) {
@@ -367,49 +403,102 @@
             // 通过vNode获取组件的选项对象, 即vNode.type
             const componentOptions = vNode.type
             // 获取组件的渲染函数render
-            const { render, data, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated } = componentOptions
+            const { render, data, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated, props: propsOption } = componentOptions
 
             // 在这里调用beforeCreate钩子, 不绑定this，这就是为什么beforeCreate中访问不到this的缘故
             beforeCreate && beforeCreate()
             // 包装data为响应式数据
             const state = reactive(data())
 
+            // 调用resolveProps函数解析出最终的props数据和attrs数据
+            // vNode.props中是实际的数据
+            // propsOptions中是对props的定义
+            const [props, attrs] = resolveProps(propsOption, vNode.props)
+
             // 定义组件实例， 一个组件本质上就是一个对象，它包含与组件有关的状态信息
             const instance = {
                 state,
+                props: shallowReactive(props),
                 isMounted: false,
                 subTree: null
             }
 
             vNode.component = instance
 
+            // 创建渲染上下文对象 就是this？本质上是组件实力的代理
+            const renderContext = new Proxy(instance, {
+                get(target, property, receiver) {
+                    // 取得组件自身状态与props数据
+                    const { state, props } = target
+                    // 先尝试读取自身状态数据
+                    if (state && property in state) {
+                        return state[property]
+                    } else if (property in props) {
+                        // 然后尝试从props中读取
+                        return props[property]
+                    } else {
+                        console.error('不存在该数据');
+                    }
+                },
+                set(target, property, value, receiver) {
+                    // 取得组件自身状态与props数据
+                    const { state, props } = target
+                    if (state && property in state) {
+                        return state[property] = value
+                    } else if (property in props) {
+                        console.warn(`Attempting to mutate prop "${property}". Props are readonly`);
+                    } else {
+                        console.error('不存在该数据');
+                    }
+                }
+            })
+
             // 在这里调用created钩子
-            created && created.call(state)
+            created && created.call(renderContext)
             // 执行渲染函数, 获取组件要渲染的内容
             // 绑定this为data返回的对象
             // 再将patch函数作为副作用函数
             effect(() => {
-                const subTree = render.call(state, state)
+                const subTree = render.call(renderContext, state)
 
                 if (!instance.isMounted) {
                     // 在这里调用beforeMounted钩子
-                    beforeMount && beforeMount.call(state)
+                    beforeMount && beforeMount.call(renderContext)
                     patch(null, subTree, container, anchor)
                     instance.isMounted = true
                     // 在这里调用mounted钩子
-                    mounted && mounted.call(state)
+                    mounted && mounted.call(renderContext)
                 } else {
                     // 在这里调用beforeUpdate钩子
-                    beforeUpdate && beforeUpdate.call(state)
+                    beforeUpdate && beforeUpdate.call(renderContext)
                     patch(instance.subTree, subTree, container, anchor)
                     // 在这里调用updated钩子
-                    updated && updated.call(state)
+                    updated && updated.call(renderContext)
                 }
                 instance.subTree = subTree
             }, {
                 scheduler: queueJob
             })
 
+        }
+
+        function resolveProps(options, propsData) {
+            const props = {}
+            const attrs = {}
+
+            // 遍历为组件传递的props数据
+            for (const key in propsData) {
+                if (key in options) {
+                    // 如果为组件传递的props数据在组件自身的props选项中有定义, 则将其视为合法的props
+                    props[key] = propsData[key]
+                } else {
+                    // 否则将其作为attrs
+                    attrs[key] = propsData[key]
+                }
+            }
+
+            // 最后返回props与attrs数据
+            return [props, attrs]
         }
 
         function unMounted(vNode) {
@@ -505,6 +594,9 @@
     const MyComponent = {
         // 组件名称，可选
         name: 'MyComponent',
+        props: {
+            title: String,
+        },
         data() {
             return {
                 foo: 'hello world'
@@ -535,17 +627,20 @@
         },
 
         render() {
-            setTimeout(() => {
-                this.foo = 'hi'
-            }, 3000)
+            // setTimeout(() => {
+            //     this.foo = 'hi'
+            // }, 3000)
             return {
                 type: 'div',
-                children: '我是foo文本内容:' + this.foo
+                children: '我是foo文本内容:' + this.foo + 'Title is ' + this.title // 访问props数据
             }
         }
     }
     const CompVNode = {
-        type: MyComponent
+        type: MyComponent,
+        props: {
+            title: 'A big Title',
+        }
     }
     renderer.render(CompVNode, document.querySelector("#app"))
 </script>
