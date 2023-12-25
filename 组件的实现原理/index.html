@@ -12,7 +12,7 @@
     <div id="app"></div>
 </body>
 <script>
-    const { reactive, effect, ref, shallowReactive } = VueReactivity
+    const { reactive, effect, ref, shallowReactive, shallowReadonly } = VueReactivity
     function shouldSetAsProps(el, key, value) {
         if (key === 'form' && el.tagName === 'INPUT') return false
         return key in el
@@ -403,12 +403,12 @@
             // 通过vNode获取组件的选项对象, 即vNode.type
             const componentOptions = vNode.type
             // 获取组件的渲染函数render
-            const { render, data, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated, props: propsOption } = componentOptions
+            let { render, data, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated, props: propsOption, setup } = componentOptions
 
             // 在这里调用beforeCreate钩子, 不绑定this，这就是为什么beforeCreate中访问不到this的缘故
             beforeCreate && beforeCreate()
             // 包装data为响应式数据
-            const state = reactive(data())
+            const state = data ? reactive(data()) : null
 
             // 调用resolveProps函数解析出最终的props数据和attrs数据
             // vNode.props中是实际的数据
@@ -423,11 +423,30 @@
                 subTree: null
             }
 
+            // setupContext
+            const setupContext = { attrs }
+
+            // 调用setup函数, 将只读版本的props作为第一个参数传递，避免用户意外地修改props的值
+            // 将setupContext
+            const setupResult = setup(shallowReadonly(instance.props), setupContext)
+
+            // setupState用来存储由setup返回的数据
+            let setupState = null
+
+            if (typeof setupResult === 'function') {
+                // 报告冲突
+                if (render) console.warn('setup 函数返回了函数，render选项将会被忽略');
+                render = setupResult
+            } else {
+                // 如果setup的返回值不是函数, 则作为数据状态赋值给setupState
+                setupState = setupResult
+            }
             vNode.component = instance
 
             // 创建渲染上下文对象 就是this？本质上是组件实力的代理
             const renderContext = new Proxy(instance, {
                 get(target, property, receiver) {
+                    console.log('读取' + property);
                     // 取得组件自身状态与props数据
                     const { state, props } = target
                     // 先尝试读取自身状态数据
@@ -436,6 +455,9 @@
                     } else if (property in props) {
                         // 然后尝试从props中读取
                         return props[property]
+                    } else if (setupState && property in setupState) {
+                        // 然后尝试从setupState中读取
+                        return setupState[property]
                     } else {
                         console.error('不存在该数据');
                     }
@@ -447,6 +469,8 @@
                         return state[property] = value
                     } else if (property in props) {
                         console.warn(`Attempting to mutate prop "${property}". Props are readonly`);
+                    } else if (setupState && property in setupState) {
+                        return setupState[property] = value
                     } else {
                         console.error('不存在该数据');
                     }
@@ -626,6 +650,15 @@
             console.log('updated');
         },
 
+        setup() {
+            return function () {
+                return {
+                    type: 'div',
+                    children: 'setup function model' + this.foo
+                }
+            }
+        },
+
         render() {
             // setTimeout(() => {
             //     this.foo = 'hi'
@@ -640,7 +673,7 @@
         type: MyComponent,
         props: {
             title: 'A big Title',
-        }
+        },
     }
     renderer.render(CompVNode, document.querySelector("#app"))
 </script>
