@@ -43,6 +43,19 @@
             })
         }
     }
+
+    let currentInstance = null
+    function setCurrentInstance(instance) {
+        currentInstance = instance
+    }
+
+    function onMounted(fn) {
+        if (currentInstance) {
+            currentInstance.mounted.push(fn)
+        } else {
+            console.log('onMounted函数只能在setup中调用')
+        }
+    }
     function createRenderer(options) {
         const {
             createElement,
@@ -423,7 +436,8 @@
                 props: shallowReactive(props),
                 isMounted: false,
                 subTree: null,
-                slots
+                slots,
+                mounted: []
             }
 
             // 定义
@@ -441,10 +455,15 @@
             // setupContext, 传递给setup函数的参数
             const setupContext = { attrs, emit, slots }
 
+            // 在调用setup函数之前，设置当前组件实例
+            setCurrentInstance(instance)
+
             // 调用setup函数, 将只读版本的props作为第一个参数传递，避免用户意外地修改props的值
             // 将setupContext
             const setupResult = setup(shallowReadonly(instance.props), setupContext)
 
+            // 在setup函数调用完毕之后，充值当前组件实例
+            setCurrentInstance(null)
             // setupState用来存储由setup返回的数据
             let setupState = null
 
@@ -508,6 +527,8 @@
                     instance.isMounted = true
                     // 在这里调用mounted钩子
                     mounted && mounted.call(renderContext)
+                    // 遍历instance.mounted数组并逐个执行即可
+                    instance.mounted && instance.mounted.forEach(hook => hook.call(renderContext))
                 } else {
                     // 在这里调用beforeUpdate钩子
                     beforeUpdate && beforeUpdate.call(renderContext)
@@ -540,6 +561,8 @@
             // 最后返回props与attrs数据
             return [props, attrs]
         }
+
+
 
         function unMounted(vNode) {
             if (vNode.type === Fragment) {
@@ -668,6 +691,9 @@
 
         setup(props, { emit }) {
             emit('change', 1, 2)
+            onMounted(function () {
+                alert(this.foo)
+            })
             return function () {
                 return {
                     type: 'div',
