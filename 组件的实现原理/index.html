@@ -415,12 +415,15 @@
             // propsOptions中是对props的定义
             const [props, attrs] = resolveProps(propsOption, vNode.props)
 
+            const slots = vNode.children || {}
+
             // 定义组件实例， 一个组件本质上就是一个对象，它包含与组件有关的状态信息
             const instance = {
                 state,
                 props: shallowReactive(props),
                 isMounted: false,
-                subTree: null
+                subTree: null,
+                slots
             }
 
             // 定义
@@ -435,8 +438,8 @@
                 }
             }
 
-            // setupContext
-            const setupContext = { attrs, emit }
+            // setupContext, 传递给setup函数的参数
+            const setupContext = { attrs, emit, slots }
 
             // 调用setup函数, 将只读版本的props作为第一个参数传递，避免用户意外地修改props的值
             // 将setupContext
@@ -460,7 +463,8 @@
                 get(target, property, receiver) {
                     console.log('读取' + property);
                     // 取得组件自身状态与props数据
-                    const { state, props } = target
+                    const { state, props, slots } = target
+                    if (property === '$slots') return slots
                     // 先尝试读取自身状态数据
                     if (state && property in state) {
                         return state[property]
@@ -667,7 +671,25 @@
             return function () {
                 return {
                     type: 'div',
-                    children: 'setup function model' + this.foo
+                    children: [
+                        {
+                            type: Text,
+                            children: `setup function model + ${this.foo}`
+                        },
+                        // slot模板编译后的样子
+                        {
+                            type: "header",
+                            children: [this.$slots.header()]
+                        },
+                        {
+                            type: "body",
+                            children: [this.$slots.body()]
+                        },
+                        {
+                            type: "footer",
+                            children: [this.$slots.footer()]
+                        },
+                    ]
                 }
             }
         },
@@ -678,7 +700,9 @@
             // }, 3000)
             return {
                 type: 'div',
-                children: '我是foo文本内容:' + this.foo + 'Title is ' + this.title // 访问props数据
+                children: [
+                    `'我是foo文本内容:' + ${this.foo} + 'Title is ' + ${this.title} // 访问props数据`
+                ]
             }
         }
     }
@@ -690,6 +714,18 @@
                 console.log(param1, param2);
             }
         },
+        // 组件slot的编译结果是一个一个的渲染函数，渲染函数中返回的是是虚拟DOM
+        children: {
+            header() {
+                return { type: 'h1', children: '我是标题' }
+            },
+            body() {
+                return { type: 'section', children: '我是内容' }
+            },
+            footer() {
+                return { type: 'p', children: '我是注脚' }
+            }
+        }
     }
     renderer.render(CompVNode, document.querySelector("#app"))
 </script>
